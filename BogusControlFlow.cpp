@@ -144,7 +144,7 @@ namespace {
       GV->eraseFromParent();
     }
     else if (!isa<Function>(C))
-      if (isa<CompositeType>(C->getType()))
+      if (isa<Type>(C->getType()))
         C->destroyConstant();
 
     // If the constant referenced anything, see if we can delete it as well.
@@ -438,6 +438,7 @@ struct BogusControlFlow : public FunctionPass {
       if (i->isBinaryOp()) { // binary instructions
         unsigned opcode = i->getOpcode();
         BinaryOperator *op, *op1 = NULL;
+        UnaryOperator *op2 = NULL;
         Twine *var = new Twine("_");
         // treat differently float or int
         // Binary int
@@ -481,8 +482,8 @@ struct BogusControlFlow : public FunctionPass {
             case 0:                                    // do nothing
               break;
             case 1:
-              op = BinaryOperator::CreateFNeg(i->getOperand(0), *var, &*i);
-              op1 = BinaryOperator::Create(Instruction::FAdd, op,
+              op2 = UnaryOperator::CreateFNeg(i->getOperand(0), *var, &*i);
+              op1 = BinaryOperator::Create(Instruction::FAdd, op2,
                                            i->getOperand(1), "gen", &*i);
               break;
             case 2:

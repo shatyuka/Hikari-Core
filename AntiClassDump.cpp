@@ -73,7 +73,7 @@ struct AntiClassDump : public ModulePass {
     M.getOrInsertFunction("objc_getClass", objc_getClass_type);
     M.getOrInsertFunction("objc_getMetaClass", objc_getClass_type);
     StructType *objc_property_attribute_t_type = reinterpret_cast<StructType *>(
-        M.getTypeByName("struct.objc_property_attribute_t"));
+        StructType::getTypeByName(M.getContext(), "struct.objc_property_attribute_t"));
     if (objc_property_attribute_t_type == NULL) {
       vector<Type *> types;
       types.push_back(Int8PtrTy);
@@ -217,9 +217,9 @@ struct AntiClassDump : public ModulePass {
                   Module *M) { // Split a class_ro_t structure
     map<string, Value *> info;
     StructType *objc_method_list_t_type =
-        M->getTypeByName("struct.__method_list_t");
-    StructType *ivar_list_t_type = M->getTypeByName("struct._ivar_list_t");
-    StructType *property_list_t_type = M->getTypeByName("struct._prop_list_t");
+        StructType::getTypeByName(M->getContext(), "struct.__method_list_t");
+    StructType *ivar_list_t_type = StructType::getTypeByName(M->getContext(), "struct._ivar_list_t");
+    StructType *property_list_t_type = StructType::getTypeByName(M->getContext(), "struct._prop_list_t");
     for (unsigned i = 0; i < class_ro->getType()->getNumElements(); i++) {
       Constant *tmp = dyn_cast<Constant>(class_ro->getAggregateElement(i));
       if (tmp->isNullValue()) {
@@ -340,7 +340,7 @@ struct AntiClassDump : public ModulePass {
       HandleMethods(metaclassCS, IRB, M, Class, false);
 
       errs() << "Updating Class Method Map For Class:" << ClassName << "\n";
-      Type *objc_method_type = M->getTypeByName("struct._objc_method");
+      Type *objc_method_type = StructType::getTypeByName(M->getContext(), "struct._objc_method");
       ArrayType *AT = ArrayType::get(objc_method_type, 0);
       Constant *newMethodList = ConstantArray::get(AT, ArrayRef<Constant *>());
       GlobalVariable *methodListGV =
@@ -372,7 +372,7 @@ struct AntiClassDump : public ModulePass {
       newMethodStructGV->copyAttributesFrom(methodListGV);
       Constant *bitcastExpr = ConstantExpr::getBitCast(
           newMethodStructGV,
-          M->getTypeByName("struct.__method_list_t")->getPointerTo());
+          StructType::getTypeByName(M->getContext(), "struct.__method_list_t")->getPointerTo());
       metaclassCS->handleOperandChange(metaclassCS->getAggregateElement(5),
                                        bitcastExpr);
       methodListGV->replaceAllUsesWith(ConstantExpr::getBitCast(
@@ -395,7 +395,7 @@ struct AntiClassDump : public ModulePass {
           cast<GlobalVariable>(classCS->getAggregateElement(5)->getOperand(0));
     }
     errs() << "Updating Class Method Map For Class:" << ClassName << "\n";
-    Type *objc_method_type = M->getTypeByName("struct._objc_method");
+    Type *objc_method_type = StructType::getTypeByName(M->getContext(), "struct._objc_method");
     ArrayType *AT = ArrayType::get(objc_method_type, 1);
     Constant *MethName = NULL;
     if (UseInitialize) {
@@ -459,7 +459,7 @@ struct AntiClassDump : public ModulePass {
     }
     Constant *bitcastExpr = ConstantExpr::getBitCast(
         newMethodStructGV,
-        M->getTypeByName("struct.__method_list_t")->getPointerTo());
+        StructType::getTypeByName(M->getContext(), "struct.__method_list_t")->getPointerTo());
     classCS->handleOperandChange(classCS->getAggregateElement(5), bitcastExpr);
     if (methodListGV) {
       methodListGV->replaceAllUsesWith(ConstantExpr::getBitCast(
@@ -479,7 +479,7 @@ struct AntiClassDump : public ModulePass {
     Function *class_getName = M->getFunction("class_getName");
     Function *objc_getMetaClass = M->getFunction("objc_getMetaClass");
     StructType *objc_method_list_t_type =
-        M->getTypeByName("struct.__method_list_t");
+        StructType::getTypeByName(M->getContext(), "struct.__method_list_t");
     for (unsigned i = 0; i < class_ro->getType()->getNumElements(); i++) {
       Constant *tmp = dyn_cast<Constant>(class_ro->getAggregateElement(i));
       if (tmp->isNullValue()) {
@@ -538,12 +538,12 @@ struct AntiClassDump : public ModulePass {
   void HandlePropertyIvar(ConstantStruct *class_ro, IRBuilder<> *IRB, Module *M,
                           Value *Class) {
     StructType *objc_property_attribute_t_type = reinterpret_cast<StructType *>(
-        M->getTypeByName("struct.objc_property_attribute_t"));
+        StructType::getTypeByName(M->getContext(), "struct.objc_property_attribute_t"));
     Function *class_addProperty = M->getFunction("class_addProperty");
     Function *class_addIvar = M->getFunction("class_addIvar");
-    StructType *ivar_list_t_type = M->getTypeByName("struct._ivar_list_t");
-    StructType *property_list_t_type = M->getTypeByName("struct._prop_list_t");
-    StructType *property_t_type = M->getTypeByName("struct._prop_t");
+    StructType *ivar_list_t_type = StructType::getTypeByName(M->getContext(), "struct._ivar_list_t");
+    StructType *property_list_t_type = StructType::getTypeByName(M->getContext(), "struct._prop_list_t");
+    StructType *property_t_type = StructType::getTypeByName(M->getContext(), "struct._prop_t");
     ConstantExpr *ivar_list = NULL;
     ConstantExpr *property_list = NULL;
     /*
@@ -654,7 +654,7 @@ struct AntiClassDump : public ModulePass {
         for (StringRef s : attrComponents) {
           StringRef key = s.substr(0, 1);
           StringRef value = s.substr(1);
-          propMap[key] = value;
+          propMap[key.str()] = value.str();
           vector<Constant *> tmp;
           Constant *KeyConst =
               dyn_cast<Constant>(IRB->CreateGlobalStringPtr(key));

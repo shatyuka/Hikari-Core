@@ -2,7 +2,7 @@
 //===----------------------------------------------------------------------===//
 #include "json.hpp"
 #include "llvm/ADT/Triple.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/AbstractCallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
@@ -49,7 +49,7 @@ struct FunctionCallObfuscate : public FunctionPass {
       SmallString<32> Path;
       if (sys::path::home_directory(Path)) { // Stolen from LineEditor.cpp
         sys::path::append(Path, "Hikari", "SymbolConfig.json");
-        SymbolConfigPath = Path.str();
+        SymbolConfigPath = Path.str().str();
       }
     }
     ifstream infile(SymbolConfigPath);
@@ -89,7 +89,7 @@ struct FunctionCallObfuscate : public FunctionPass {
     M.getOrInsertFunction("objc_getClass", objc_getClass_type);
     M.getOrInsertFunction("objc_getMetaClass", objc_getClass_type);
     StructType *objc_property_attribute_t_type = reinterpret_cast<StructType *>(
-        M.getTypeByName("struct.objc_property_attribute_t"));
+        StructType::getTypeByName(M.getContext(), "struct.objc_property_attribute_t"));
     if (objc_property_attribute_t_type == NULL) {
       vector<Type *> types;
       types.push_back(Int8PtrTy);
@@ -146,7 +146,7 @@ struct FunctionCallObfuscate : public FunctionPass {
       GlobalVariable &GV = *G;
       if (GV.getName().str().find("OBJC_CLASSLIST_REFERENCES") == 0) {
         if (GV.hasInitializer()) {
-          string className = GV.getInitializer()->getName();
+          string className = GV.getInitializer()->getName().str();
           className.replace(className.find("OBJC_CLASS_$_"),
                             strlen("OBJC_CLASS_$_"), "");
           for (auto U = GV.user_begin(); U != GV.user_end(); U++) {
@@ -225,16 +225,16 @@ struct FunctionCallObfuscate : public FunctionPass {
         false); // int has a length of 32 on both 32/64bit platform
     FunctionType *dlsym_type =
         FunctionType::get(Int8PtrTy, {Int8PtrTy, Int8PtrTy}, false);
-    Function *dlopen_decl =
-        cast<Function>(M->getOrInsertFunction("dlopen", dlopen_type));
-    Function *dlsym_decl =
-        cast<Function>(M->getOrInsertFunction("dlsym", dlsym_type));
+    FunctionCallee dlopen_decl =
+        M->getOrInsertFunction("dlopen", dlopen_type);
+    FunctionCallee dlsym_decl =
+        M->getOrInsertFunction("dlsym", dlsym_type);
     // Begin Iteration
     for (BasicBlock &BB : F) {
       for (auto I = BB.getFirstInsertionPt(), end = BB.end(); I != end; ++I) {
         Instruction &Inst = *I;
         if (isa<CallInst>(&Inst) || isa<InvokeInst>(&Inst)) {
-          CallSite CS(&Inst);
+          AbstractCallSite CS(Inst.getSingleUndroppableUse());
           Function *calledFunction = CS.getCalledFunction();
           if (calledFunction == NULL) {
             /*
@@ -245,7 +245,7 @@ struct FunctionCallObfuscate : public FunctionPass {
               the called Function* from there
             */
             calledFunction =
-                dyn_cast<Function>(CS.getCalledValue()->stripPointerCasts());
+                dyn_cast<Function>(CS.getCalledOperand()->stripPointerCasts());
           }
           // Simple Extracting Failed
           // Use our own implementation
@@ -253,7 +253,7 @@ struct FunctionCallObfuscate : public FunctionPass {
             DEBUG_WITH_TYPE(
                 "opt", errs()
                            << "Failed To Extract Function From Indirect Call: "
-                           << *CS.getCalledValue() << "\n");
+                           << *CS.getCalledOperand() << "\n");
             continue;
           }
           // It's only safe to restrict our modification to external symbols
@@ -271,7 +271,7 @@ struct FunctionCallObfuscate : public FunctionPass {
             string sname = this->Configuration[calledFunction->getName().str()]
                                .get<string>();
             StringRef calledFunctionName = StringRef(sname);
-            BasicBlock *EntryBlock = CS->getParent();
+            BasicBlock *EntryBlock = CS.getInstruction()->getParent();
             IRBuilder<> IRB(EntryBlock, EntryBlock->getFirstInsertionPt());
             vector<Value *> dlopenargs;
             dlopenargs.push_back(Constant::getNullValue(Int8PtrTy));
@@ -298,8 +298,8 @@ struct FunctionCallObfuscate : public FunctionPass {
             args.push_back(IRB.CreateGlobalStringPtr(calledFunctionName));
             Value *fp = IRB.CreateCall(dlsym_decl, ArrayRef<Value *>(args));
             Value *bitCastedFunction =
-                IRB.CreateBitCast(fp, CS.getCalledValue()->getType());
-            CS.setCalledFunction(bitCastedFunction);
+                IRB.CreateBitCast(fp, CS.getCalledOperand()->getType());
+            CS.getInstruction()->setCalledOperand(bitCastedFunction);
           }
         }
       }

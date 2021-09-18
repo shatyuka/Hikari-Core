@@ -1,4 +1,4 @@
-add_llvm_library(LLVMObfuscation
+add_llvm_component_library(LLVMObfuscation
   FunctionCallObfuscate.cpp
   CryptoUtils.cpp
   BogusControlFlow.cpp
@@ -11,9 +11,14 @@ add_llvm_library(LLVMObfuscation
   IndirectBranch.cpp
   FunctionWrapper.cpp
   Obfuscation.cpp
+
   DEPENDS
   intrinsics_gen
-  )
+
+  COMPONENT_NAME
+  Obfuscation
+)
+
 execute_process(
   COMMAND git log -1 --format=%H
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}

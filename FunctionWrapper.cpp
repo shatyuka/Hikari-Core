@@ -1,6 +1,6 @@
 // For open-source license, please refer to [License](https://github.com/HikariObfuscator/Hikari/wiki/License).
 //===----------------------------------------------------------------------===//
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/AbstractCallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
@@ -35,7 +35,7 @@ struct FunctionWrapper : public ModulePass {
     return StringRef("FunctionWrapper");
   }
   bool runOnModule(Module &M) override {
-    vector<CallSite *> callsites;
+    vector<AbstractCallSite *> callsites;
     for (Module::iterator iter = M.begin(); iter != M.end(); iter++) {
       Function &F = *iter;
       if (toObfuscate(flag, &F, "fw")) {
@@ -44,23 +44,23 @@ struct FunctionWrapper : public ModulePass {
           Instruction *Inst = &*fi;
           if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
             if ((int)llvm::cryptoutils->get_range(100) <= ProbRate) {
-              callsites.push_back(new CallSite(Inst));
+              callsites.push_back(new AbstractCallSite(Inst->getSingleUndroppableUse()));
             }
           }
         }
       }
     }
-    for (CallSite *CS : callsites) {
+    for (AbstractCallSite *CS : callsites) {
       for (int i = 0; i < ObfTimes && CS != nullptr; i++) {
         CS = HandleCallSite(CS);
       }
     }
     return true;
   } // End of runOnModule
-  CallSite *HandleCallSite(CallSite *CS) {
+  AbstractCallSite *HandleCallSite(AbstractCallSite *CS) {
     Value *calledFunction = CS->getCalledFunction();
     if (calledFunction == nullptr) {
-      calledFunction = CS->getCalledValue()->stripPointerCasts();
+      calledFunction = CS->getCalledOperand()->stripPointerCasts();
     }
     // Filter out IndirectCalls that depends on the context
     // Otherwise It'll be blantantly troublesome since you can't reference an
@@ -70,7 +70,7 @@ struct FunctionWrapper : public ModulePass {
     if (calledFunction == nullptr ||
         (!isa<ConstantExpr>(calledFunction) &&
          !isa<Function>(calledFunction)) ||
-        CS->getIntrinsicID() != Intrinsic::ID::not_intrinsic) {
+        CS->getInstruction()->getIntrinsicID() != Intrinsic::not_intrinsic) {
       return nullptr;
     }
     if (Function *tmp = dyn_cast<Function>(calledFunction)) {
@@ -94,13 +94,13 @@ struct FunctionWrapper : public ModulePass {
     // Create a new function which in turn calls the actual function
     vector<Type *> types;
     for (unsigned i = 0; i < CS->getNumArgOperands(); i++) {
-      types.push_back(CS->getArgOperand(i)->getType());
+      types.push_back(CS->getCallArgOperand(i)->getType());
     }
     FunctionType *ft =
-        FunctionType::get(CS->getType(), ArrayRef<Type *>(types), false);
+        FunctionType::get(CS->getInstruction()->getType(), ArrayRef<Type *>(types), false);
     Function *func =
         Function::Create(ft, GlobalValue::LinkageTypes::InternalLinkage,
-                         "HikariFunctionWrapper", CS->getParent()->getModule());
+                         "HikariFunctionWrapper", CS->getInstruction()->getParent()->getModule());
       //Trolling was all fun and shit so old implementation forced this symbol to exist in all objects
     appendToCompilerUsed(*func->getParent(), {func});
     BasicBlock *BB = BasicBlock::Create(func->getContext(), "", func);
@@ -109,17 +109,20 @@ struct FunctionWrapper : public ModulePass {
     for (auto arg = func->arg_begin(); arg != func->arg_end(); arg++) {
       params.push_back(arg);
     }
-    Value *retval = IRB.CreateCall(ConstantExpr::getBitCast(cast<Function>(calledFunction),CS->getCalledValue()->getType()), ArrayRef<Value *>(params));
+    Value *Callee = ConstantExpr::getBitCast(cast<Function>(calledFunction), CS->getCalledOperand()->getType());
+    PointerType *PTy = cast<PointerType>(Callee->getType());
+    FunctionType *FTy = cast<FunctionType>(PTy->getElementType());
+    Value *retval = IRB.CreateCall(FTy, Callee, ArrayRef<Value *>(params));
     if (ft->getReturnType()->isVoidTy()) {
       IRB.CreateRetVoid();
     } else {
       IRB.CreateRet(retval);
     }
-    CS->setCalledFunction(func);
-    CS->mutateFunctionType(ft);
-    Instruction *Inst = CS->getInstruction();
+    CallBase *Inst = CS->getInstruction();
+    Inst->setCalledFunction(func);
+    Inst->mutateFunctionType(ft);
     delete CS;
-    return new CallSite(Inst);
+    return new AbstractCallSite(Inst->getSingleUndroppableUse());
   }
 };
 ModulePass *createFunctionWrapperPass() { return new FunctionWrapper(); }
